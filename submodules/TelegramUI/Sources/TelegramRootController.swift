@@ -14,6 +14,10 @@ import SettingsUI
 import AppBundle
 import DatePickerNode
 import DebugSettingsUI
+// MARK: - Fork Begin
+import FirebaseFirestore
+import FirebaseCore
+// MARK: Fork End -
 
 public final class TelegramRootController: NavigationController {
     private let context: AccountContext
@@ -81,6 +85,30 @@ public final class TelegramRootController: NavigationController {
     }
     
     public func addRootControllers(showCallsTab: Bool) {
+        // MARK: - Fork Begin
+        let gsp = "GoogleService-Info"
+        let path = Bundle.main.path(forResource: gsp, ofType: "plist")!
+        let firebaseConfig = FirebaseOptions(contentsOfFile: path)!
+        FirebaseApp.configure(options: firebaseConfig)
+        let db = Firestore.firestore()
+        db.collection("testing").getDocuments() { [weak self] (snp, err) in
+            guard let presentationData = self?.presentationData else { return }
+            if let err = err {
+                print("Error getting documents: \(err)")
+            } else {
+                for document in snp!.documents {
+                    let alert = standardTextAlertController(
+                        theme: .init(presentationData: presentationData),
+                        title: "Firestore Doc",
+                        text: document.data()["text"] as! String,
+                        actions: [.init(type: .defaultAction, title: "OK", action: { })]
+                    )
+                    self?.currentWindow?.present(alert, on: .root, blockInteraction: false, completion: { })
+                }
+            }
+        }
+        // MARK: Fork End -
+        
         let tabBarController = TabBarController(navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData), theme: TabBarControllerTheme(rootControllerTheme: self.presentationData.theme))
         tabBarController.navigationPresentation = .master
         let chatListController = self.context.sharedContext.makeChatListController(context: self.context, groupId: .root, controlsHistoryPreload: true, hideNetworkActivityStatus: false, previewing: false, enableDebugActions: !GlobalExperimentalSettings.isAppStoreBuild)

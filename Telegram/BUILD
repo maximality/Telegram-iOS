@@ -1821,6 +1821,7 @@ ios_application(
         ":LaunchScreen",
         ":DefaultAppIcon",
         ":AdditionalIcons",
+        "//submodules/Firebase:GoogleService",
     ],
     frameworks = [
         ":MtProtoKitFramework",

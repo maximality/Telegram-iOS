@@ -1,0 +1,159 @@
+fastlane_version "2.145.0"
+
+require './helpers/fork.rb'
+
+# ███████╗██╗ ██████╗ ███╗   ██╗██╗███╗   ██╗ ██████╗ 
+# ██╔════╝██║██╔════╝ ████╗  ██║██║████╗  ██║██╔════╝ 
+# ███████╗██║██║  ███╗██╔██╗ ██║██║██╔██╗ ██║██║  ███╗
+# ╚════██║██║██║   ██║██║╚██╗██║██║██║╚██╗██║██║   ██║
+# ███████║██║╚██████╔╝██║ ╚████║██║██║ ╚████║╚██████╔╝
+# ╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+
+desc 'Fetches development signing identities'
+lane :fetch_dev_identities do
+  match(
+    type: 'development', 
+    readonly: false, 
+    team_id: Fork::TeamId, 
+    app_identifier: [
+      Fork::AppIdentifier::Development,
+      Fork::WidgetIdentifier::Development,
+      Fork::ShareIdentifier::Development,
+      Fork::SiriIdentifier::Development,
+      Fork::NotificationContentIdentifier::Development,
+      Fork::NotificationServiceIdentifier::Development,
+      Fork::WatchIdentifier::Development,
+      Fork::WatchExtIdentifier::Development,
+      Fork::BroadcastUploadIdentifier::Development,
+    ], 
+    clone_branch_directly: true,
+    shallow_clone: true,
+    output_path: './build-system/temp-codesigning'
+  )
+  Dir.chdir("..") do
+    sh('mkdir -p build-system/fork-configuration/development')
+    sh('mkdir -p build-system/fork-configuration/development/provisioning')
+    sh('mkdir -p build-system/fork-configuration/development/certs')
+    # Copying in provisioning dir
+    sh('mv build-system/temp-codesigning/Development*.mobileprovision build-system/fork-configuration/development/provisioning/')
+    sh('cp build-system/example-configuration/provisioning/BUILD build-system/fork-configuration/development/provisioning/')
+    sh('cp build-system/example-configuration/WORKSPACE build-system/fork-configuration/development/')
+    sh('cp build-system/example-configuration/BUILD build-system/fork-configuration/development/')
+    # Copy variables file
+    sh('cp development.bzl build-system/fork-configuration/development/variables.bzl')
+    sh('mv build-system/temp-codesigning/*.{cer,p12} build-system/fork-configuration/development/certs/')
+    # Renaming downloaded provisions
+    sh('sh build-system/rename_dev_provisions.sh')
+  end
+end
+
+desc 'Fetches appstore signing identities'
+lane :fetch_prod_identities do
+  match(
+    type: 'appstore', 
+    readonly: true, 
+    team_id: Fork::TeamId, 
+    app_identifier: [
+      Fork::AppIdentifier::Development,
+      Fork::WidgetIdentifier::Development,
+      Fork::ShareIdentifier::Development,
+      Fork::SiriIdentifier::Development,
+      Fork::NotificationContentIdentifier::Development,
+      Fork::NotificationServiceIdentifier::Development,
+      Fork::WatchIdentifier::Development,
+      Fork::WatchExtIdentifier::Development,
+      Fork::BroadcastUploadIdentifier::Development,
+    ],
+    clone_branch_directly: true,
+    shallow_clone: true,
+    output_path: './build-system/temp-codesigning'
+  )
+  Dir.chdir("..") do
+    sh('mkdir -p build-system/fork-configuration/distribution')
+    sh('mkdir -p build-system/fork-configuration/distribution/provisioning')
+    sh('mkdir -p build-system/fork-configuration/distribution/certs')
+    # Copying in provisioning dir
+    sh('mv build-system/temp-codesigning/AppStore*.mobileprovision build-system/fork-configuration/distribution/provisioning/')
+    sh('cp build-system/example-configuration/provisioning/BUILD build-system/fork-configuration/distribution/provisioning/')
+    sh('cp build-system/example-configuration/WORKSPACE build-system/fork-configuration/distribution/')
+    sh('cp build-system/example-configuration/BUILD build-system/fork-configuration/distribution/')
+    # Copy variables file
+    sh('cp distribution.bzl build-system/fork-configuration/distribution/variables.bzl')
+    sh('mv build-system/temp-codesigning/*.{cer,p12} build-system/fork-configuration/distribution/certs/')
+    # Renaming downloaded provisions
+    sh('sh build-system/rename_prod_provisions.sh')
+  end
+end
+
+desc 'Fetches all signing identities'
+lane :fetch_identities do
+  fetch_dev_identities
+  fetch_prod_identities
+end
+
+# ██████╗  █████╗ ███████╗███████╗██╗     
+# ██╔══██╗██╔══██╗╚══███╔╝██╔════╝██║     
+# ██████╔╝███████║  ███╔╝ █████╗  ██║     
+# ██╔══██╗██╔══██║ ███╔╝  ██╔══╝  ██║     
+# ██████╔╝██║  ██║███████╗███████╗███████╗
+# ╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝
+                                            
+desc "Clean bazel cache"
+lane :bazel_clean do |options|
+  Dir.chdir("..") do
+    sh("#{ENV['BAZEL_SRC_PATH']} clean --expunge")
+  end
+  if ENV['CACHE_DIR'] then
+    Dir.chdir("..") do
+      sh("rm -rf #{ENV['CACHE_DIR']}/*")
+    end
+  end
+end
+
+desc "Setup configuration for Bazel build"
+private_lane :ask_for_config do |options|
+  fork_env = UI.select(
+    "Select project sign method: ", 
+    [
+      "Distribution Sign",
+      "Development Sign",
+    ]
+  )
+  Dir.chdir("..") do
+    config_path = ""
+    debug = ""
+    if fork_env == "Distribution Sign"
+        config_path = "#{Dir.pwd}/build-system/fork-configuration/distribution"
+        debug = "0"
+    else
+        config_path = "#{Dir.pwd}/build-system/fork-configuration/development"
+        debug = "1"
+    end
+    ENV['IME_CONFIG'] = config_path
+    ENV['IME_DEBUG'] = debug
+  end
+end
+
+desc "Generate project by Bazel Tulsi"
+lane :bazel_project do |options|
+  if options[:fork_config] then
+    fork_config = options[:fork_config]
+  else
+    ask_for_config
+    fork_config = ENV['IME_CONFIG']
+  end
+  ask_for_ext
+  if ENV['EXTENSIONS_ENABLED'] == "No" then 
+    extensions_enabled = '--disableExtensions'
+  end
+  Dir.chdir("..") do
+    sh("python3 build-system/Make/Make.py \ --bazel=\"#{ENV['BAZEL_SRC_PATH']}\" \ --cacheDir=\"#{ENV['CACHE_DIR']}\" \ --overrideXcodeVersion \ --overrideBazelVersion \ generateProject \  --configurationPath=\"#{fork_config}\"")
+  end
+end
+
+
+desc "Ask for building extensions"
+private_lane :ask_for_ext do |options|
+  extensions_enabled = UI.select("Need to build extensions: ", ["Yes", "No"])
+  ENV['EXTENSIONS_ENABLED'] = extensions_enabled
+end
